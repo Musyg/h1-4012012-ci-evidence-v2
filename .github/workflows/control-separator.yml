@@ -18,11 +18,13 @@ jobs:
           echo "canary preflight: length is 32"
           echo "how this log renders a value Actions was told about: $CANARY"
 
-      - name: Install the Vercel CLI
+      - name: Install the Vercel CLI, pinned
         run: |
-          npm i -g vercel@latest
-          echo "resolved CLI version:"
+          npm i -g vercel@59.15.1
+          echo "installed version:"
           vc --version
+          echo "npm integrity of the pinned version:"
+          npm view vercel@59.15.1 dist.integrity dist.shasum dist.tarball
 
       - name: Project state before, counts only
         env:
