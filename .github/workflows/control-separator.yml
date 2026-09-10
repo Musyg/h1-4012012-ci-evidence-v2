@@ -1,0 +1,57 @@
+name: control-separator
+
+on:
+  workflow_dispatch:
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Canary preflight
+        env:
+          CANARY: ${{ secrets.DEMO_SECRET_SHAPED }}
+        run: |
+          if [ ${#CANARY} -ne 32 ]; then
+            echo "preflight FAILED: canary length is ${#CANARY}, expected 32"
+            exit 1
+          fi
+          echo "canary preflight: length is 32"
+          echo "how this log renders a value Actions was told about: $CANARY"
+
+      - name: Install the Vercel CLI
+        run: |
+          npm i -g vercel@latest
+          echo "resolved CLI version:"
+          vc --version
+
+      - name: Project state before, counts only
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          curl -s -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/${{ vars.PRJ }}?teamId=${{ vars.TEAM }}" \
+          | python3 -c "import json,sys;d=json.load(sys.stdin);print('ssoProtection set:',d.get('ssoProtection') is not None);print('bypass secret count:',len(d.get('protectionBypass') or {}))"
+
+      - name: Anonymous check, no credential
+        run: |
+          env -i /usr/bin/curl -s -o /dev/null \
+            -w 'anonymous GET -> status=%{http_code} bytes=%{size_download}\n' \
+            https://deploy-protection-lab.vercel.app/
+
+      - name: Vendor command WITH the -- separator
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          vc curl deploy-protection-lab.vercel.app/api/health -- \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"name":"Ada"}'
+
+      - name: Project state after, counts only
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          curl -s -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/${{ vars.PRJ }}?teamId=${{ vars.TEAM }}" \
+          | python3 -c "import json,sys;d=json.load(sys.stdin);print('bypass secret count:',len(d.get('protectionBypass') or {}))"
