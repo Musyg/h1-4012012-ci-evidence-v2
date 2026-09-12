@@ -1,0 +1,92 @@
+name: chain-v7-vulnerable-documented-form
+
+on:
+  workflow_dispatch:
+    inputs:
+      commitment:
+        description: freeze commitment line, carried verbatim
+        required: true
+        type: string
+
+jobs:
+  vulnerable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Freeze commitment carried into this run
+        run: |
+          printf 'freeze-commitment-carried: %s\n' "${{ inputs.commitment }}"
+
+      - name: Repository visibility, read from the API inside the run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(gh api "repos/${{ github.repository }}" --jq .visibility)
+          P=$(gh api "repos/${{ github.repository }}" --jq .private)
+          printf 'repo visibility during the run: %s private: %s at %s\n' \
+            "$V" "$P" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ "$V" != "public" ] || [ "$P" != "false" ]; then
+            echo "visibility precondition FAILED"; exit 1
+          fi
+
+      - name: Canary preflight, how Actions renders a value it was told about
+        env:
+          CANARY: ${{ secrets.DEMO_SECRET_SHAPED }}
+        run: |
+          if [ ${#CANARY} -ne 32 ]; then
+            echo "preflight FAILED: canary length is ${#CANARY}, expected 32"
+            exit 1
+          fi
+          echo "canary preflight: length is 32"
+          echo "how this log renders a value Actions was told about: $CANARY"
+
+      - name: Install the Vercel CLI, pinned
+        run: |
+          npm i -g vercel@59.15.1
+          echo "installed version:"
+          vc --version
+          echo "npm integrity of the pinned version:"
+          npm view vercel@59.15.1 dist.integrity dist.shasum dist.tarball
+
+      - name: Project state before, counts only
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PRJ: ${{ secrets.VC_PRJ }}
+          TEAM: ${{ secrets.VC_TEAM }}
+        run: |
+          printf 'header = "Authorization: Bearer %s"\nsilent\n' "$VERCEL_TOKEN" \
+          | curl -K - "https://api.vercel.com/v9/projects/$PRJ?teamId=$TEAM" \
+          | python3 -c "import json,sys;d=json.load(sys.stdin);print('ssoProtection set:',d.get('ssoProtection') is not None);print('bypass secret count:',len(d.get('protectionBypass') or {}))"
+
+      - name: Anonymous check, no credential
+        run: |
+          /usr/bin/curl -s -o /dev/null \
+            -w 'anonymous GET -> status=%{http_code} bytes=%{size_download}\n' \
+            https://deploy-protection-lab.vercel.app/
+
+      - name: Vendor command exactly as the skill file writes it
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          vc curl deploy-protection-lab.vercel.app/api/health -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"name":"Ada"}'
+
+      - name: Project state after, counts only
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PRJ: ${{ secrets.VC_PRJ }}
+          TEAM: ${{ secrets.VC_TEAM }}
+        run: |
+          printf 'header = "Authorization: Bearer %s"\nsilent\n' "$VERCEL_TOKEN" \
+          | curl -K - "https://api.vercel.com/v9/projects/$PRJ?teamId=$TEAM" \
+          | python3 -c "import json,sys;d=json.load(sys.stdin);print('bypass secret count:',len(d.get('protectionBypass') or {}))"
+
+      - name: Repository visibility, again, after the vendor command
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(gh api "repos/${{ github.repository }}" --jq .visibility)
+          printf 'repo visibility after the vendor command: %s at %s\n' \
+            "$V" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ "$V" != "public" ]; then echo "visibility FAILED"; exit 1; fi
